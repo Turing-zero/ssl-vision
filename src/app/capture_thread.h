@@ -54,6 +54,10 @@
 #include "capture_spinnaker.h"
 #endif
 
+#ifdef HIKMVCAM
+#include "capture_hikmvcam.h"
+#endif
+
 /*!
   \class   CaptureThread
   \brief   A thread for capturing and processing video data
@@ -78,6 +82,7 @@ protected:
   CaptureInterface * captureBasler = nullptr;
   CaptureInterface * captureSpinnaker = nullptr;
   CaptureInterface * captureSplitter = nullptr;
+  CaptureInterface * captureHikMvCam = nullptr;
   AffinityManager * affinity;
   FrameBuffer * rb;
   bool _kill;
@@ -93,6 +98,7 @@ protected:
   VarList * basler = nullptr;
   VarList * spinnaker = nullptr;
   VarList * splitter = nullptr;
+  VarList * hikmvcam = nullptr;
   VarList * control;
   VarTrigger * c_start;
   VarTrigger * c_stop;

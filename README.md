@@ -47,6 +47,7 @@ Multiple cameras are supported:
  * Matrix-Vision BlueFox (USB 2.0) and BlueFox3 (USB 3.0) cameras via [mvIMPACT Acquire SDK](http://www.matrix-vision.com/software-drivers-en.html)
  * Basler cameras via the [Pylon Software Suite](https://www.baslerweb.com/en/products/software/basler-pylon-camera-software-suite/)
  * FLIR cameras via the [SPINNAKER and FLYCAP SDK](https://www.flir.com/support-center/iis/machine-vision/downloads/spinnaker-sdk-flycapture-and-firmware-download/)
+ * Hikrobot cameras via [Hikrobot MVS(Machine Vision Software)](https://www.hikrobotics.com/en/machinevision/service/download?module=0)
  
 To enable support for one or more of those cameras, install the corresponding SDK (linked above and described in more details below) first.
 Then build with the corresponding option:
@@ -57,6 +58,7 @@ Then build with the corresponding option:
  * `-DUSE_PYLON=true`
  * `-DUSE_FLYCAP=true`
  * `-DUSE_V4L=true`
+ * `-DUSE_HIKMVCAM=true`
  
 Example for a release build: `cd build; cmake -DUSE_SPINNAKER=true ..`.
  As these are cached cmake options, you only need to run this once and can build with `make` afterwards.
@@ -104,6 +106,14 @@ Tested cameras:
  * Blackfly S (BFS-U3-51S5C-C)
  
 Download and install the [SDK](https://www.flir.com/products/spinnaker-sdk) and build ssl-vision with `-DUSE_SPINNAKER=true`.
+
+### HikMV cameras
+
+USB 3.0 cameras are supported and tested, GigE cameras should be supported too (not tested).
+
+Download the [SDK](https://www.hikrobotics.com/en/machinevision/service/download?module=0), install it using `setup.sh` inside the package and build ssl-vision with `-DUSE_HIKMVCAM=true`
+
+current tested : MVS2.1.2(Linux)
 
 ## Compilation
 

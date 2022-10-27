@@ -114,6 +114,12 @@ CaptureThread::CaptureThread(int cam_id)
   settings->addChild(splitter);
   captureSplitter = new CaptureSplitter(splitter, camId);
 #endif
+#ifdef HIKMVCAM
+  hikmvcam = new VarList("HikMvCam");
+  captureModule->addItem("HikMvCam");
+  settings->addChild(hikmvcam);
+  captureHikMvCam = new CaptureHikMvCam(hikmvcam, camId);
+#endif
 
   selectCaptureMethod();
   _kill =false;
@@ -232,6 +238,11 @@ void CaptureThread::selectCaptureMethod() {
 #ifdef CAMERA_SPLITTER
   else if(captureModule->getString() == "Splitter") {
     new_capture = captureSplitter;
+  }
+#endif
+#ifdef HIKMVCAM
+  else if(captureModule->getString() == "HikMvCam"){
+    new_capture = captureHikMvCam;
   }
 #endif
 
