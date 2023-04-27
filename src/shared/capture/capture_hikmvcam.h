@@ -86,7 +86,6 @@ public:
     void readParameterValues(VarList*);
     void writeParameterValues(VarList*);
 
-
     bool copyAndConvertFrame(const RawImage & src, RawImage & target) override;
 
     string getCaptureMethodName() const override;

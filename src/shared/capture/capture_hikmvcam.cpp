@@ -20,6 +20,7 @@
 //========================================================================
 #include "capture_hikmvcam.h"
 #include <sys/time.h>
+#include <opencv2/opencv.hpp>
 
 CaptureHikMvCam::CaptureHikMvCam(VarList * _settings, int default_camera_id, QObject * parent) : QObject(parent), CaptureInterface(_settings),m_pcMyCamera(nullptr){
     cam_id = (unsigned int) default_camera_id;
@@ -204,7 +205,7 @@ RawImage CaptureHikMvCam::getFrame(){
     RawImage result;
     int nRet = m_pcMyCamera->GetImageBuffer(&m_stFrame, 1000);
     if (MV_OK == nRet){
-        result.setColorFormat(COLOR_RAW8);
+        result.setColorFormat(COLOR_YUV422_YUYV);
         result.setWidth(m_stFrame.stFrameInfo.nWidth);
         result.setHeight(m_stFrame.stFrameInfo.nHeight);
         result.setData(m_stFrame.pBufAddr);
@@ -231,7 +232,11 @@ bool CaptureHikMvCam::copyAndConvertFrame(const RawImage & src, RawImage & targe
         return false;
     }
     target.setTime(src.getTime());
-    target = src;
+    target.ensure_allocation(COLOR_RGB8, src.getWidth(), src.getHeight());
+    cv::Mat srcMat(src.getHeight(), src.getWidth(), CV_8UC2, src.getData());
+    cv::Mat dstMat(target.getHeight(), target.getWidth(), CV_8UC3, target.getData());
+    cv::cvtColor(srcMat, dstMat, cv::COLOR_YUV2RGB_YUYV);
+    target.setColorFormat(COLOR_RGB8);
     mutex.unlock();
     return true;
 }
