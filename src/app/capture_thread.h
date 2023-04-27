@@ -21,7 +21,9 @@
 
 #ifndef CAPTURE_THREAD_H
 #define CAPTURE_THREAD_H
+#ifdef DC1394
 #include "capturedc1394v2.h"
+#endif
 #include "capturefromfile.h"
 #include "capturev4l.h"
 #include "capture_generator.h"
@@ -46,7 +48,7 @@
 #include "capture_flycap.h"
 #endif
 
-#ifdef PYLON5
+#ifdef PYLON
 #include "capture_basler.h"
 #endif
 

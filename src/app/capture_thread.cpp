@@ -38,7 +38,7 @@ CaptureThread::CaptureThread(int cam_id)
   // timings should only be printed on demand for a short period of time by temporally activating this flag
   control->addChild( (VarType*) (c_print_timings = new VarBool("print timings",false)));
   control->addChild( (VarType*) (c_refresh= new VarTrigger("re-read params","Refresh")));
-  control->addChild( (VarType*) (captureModule= new VarStringEnum("Capture Module",camId < 2 ? "Read from files" : "None")));
+  control->addChild( (VarType*) (captureModule= new VarStringEnum("Capture Module",camId < 1 ? "Read from files" : "None")));
   captureModule->addFlags(VARTYPE_FLAG_NOLOAD_ENUM_CHILDREN);
   captureModule->addItem("None");
   captureModule->addItem("Read from files");
@@ -73,11 +73,11 @@ CaptureThread::CaptureThread(int cam_id)
   captureV4L = new CaptureV4L(v4l, camId);
 #endif
 
-#ifdef PYLON5
+#ifdef PYLON
   captureModule->addItem("Basler GigE");
   basler = new VarList("Basler GigE");
   settings->addChild(basler);
-  captureBasler = new CaptureBasler(basler);
+  captureBasler = new CaptureBasler(basler, camId);
 #endif
 
 #ifdef FLYCAP
@@ -154,7 +154,7 @@ CaptureThread::~CaptureThread()
   delete captureV4L;
 #endif
 
-#ifdef PYLON5
+#ifdef PYLON
   delete captureBasler;
 #endif
 
@@ -215,7 +215,7 @@ void CaptureThread::selectCaptureMethod() {
     new_capture = captureFlycap;
   }
 #endif
-#ifdef PYLON5
+#ifdef PYLON
   else if (captureModule->getString() == "Basler GigE") {
     new_capture = captureBasler;
   }
@@ -324,7 +324,9 @@ void CaptureThread::run() {
           auto t_start = std::chrono::steady_clock::now();
           RawImage pic_raw=capture->getFrame();
           auto t_getFrame = std::chrono::steady_clock::now();
-          d->time=pic_raw.getTime();
+          pic_raw.setTime(GetTimeSec());
+          d->time = pic_raw.getTime();
+          d->time_cam=pic_raw.getTimeCam();
           bool bSuccess = capture->copyAndConvertFrame( pic_raw,d->video);
           auto t_convert = std::chrono::steady_clock::now();
           capture_mutex.unlock();

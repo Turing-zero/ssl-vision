@@ -3,12 +3,13 @@
 /robocup-*
 /settings.xml
 /backup
-/test-data/*
-!/test-data/rc2019
-!/test-data/rc2022
+/test-data
 /.idea
 cmake-build*
 /.dir-locals.el
 .ccls-cache
 *~
 /compile_commands.json
+
+.vscode
+CMakeLists.txt.user

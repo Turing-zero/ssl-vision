@@ -27,7 +27,7 @@ void BaslerInitManager::unregister_capture() {
 	}
 }
 
-CaptureBasler::CaptureBasler(VarList* _settings, QObject* parent) :
+CaptureBasler::CaptureBasler(VarList* _settings, int default_camera_id, QObject* parent) :
 		QObject(parent), CaptureInterface(_settings) {
 	is_capturing = false;
 	camera = nullptr;
@@ -45,7 +45,7 @@ CaptureBasler::CaptureBasler(VarList* _settings, QObject* parent) :
 	v_color_mode->addItem(Colors::colorFormatToString(COLOR_RGB8));
 	vars->addChild(v_color_mode);
 
-	vars->addChild(v_camera_id = new VarInt("Camera ID", 0, 0, 3));
+	vars->addChild(v_camera_id = new VarInt("Camera ID", default_camera_id, 0, 3));
 
 	v_framerate = new VarDouble("Max Framerate",100.0,0.0,100.0);
 	vars->addChild(v_framerate);
@@ -288,6 +288,7 @@ bool CaptureBasler::copyAndConvertFrame(const RawImage & src,
 	try {
 		target.ensure_allocation(COLOR_RGB8, src.getWidth(), src.getHeight());
 		target.setTime(src.getTime());
+		target.setTimeCam (src.getTimeCam());
 		memcpy(target.getData(), src.getData(), src.getNumBytes());
 	} catch (...) {
 		MUTEX_UNLOCK;

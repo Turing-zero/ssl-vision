@@ -40,7 +40,7 @@ private:
 	QMutex mutex;
 
 public:
-	CaptureBasler(VarList* _settings=0, QObject* parent=0);
+	CaptureBasler(VarList* _settings=0, int default_camera_id=0, QObject* parent=0);
     void mvc_connect(VarList * group);
 	~CaptureBasler();
 
@@ -93,13 +93,11 @@ private:
   	bool _stopCapture();
   	bool _buildCamera();
 
-// A slight blur helps to reduce noise and improve color recognition.
-#ifdef OPENCV
+    // A slight blur helps to reduce noise and improve color recognition.
   	static const double blur_sigma;
   	void gaussianBlur(RawImage& img);
     void contrast(RawImage& img, double factor);
     void sharpen(RawImage& img);
-#endif
 };
 
 #endif

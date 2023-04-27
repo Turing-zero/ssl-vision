@@ -36,7 +36,8 @@ Or, in archlinux, run the `InstallPackagesArch.sh` script.
 ## Test data
 
 If you do not have a camera available and want to test or improve ssl-vision, you can use the `CaptureFromFile` capture module to play back images.
-Some test data is available through [GIT LFS](https://git-lfs.github.com/), but bandwidth is very limited with GitHub and might not always work. You can alternatively download test data [here](https://cloud.robocup.org/s/qjKQEiKnGnLAkn9) and copy it to [test-data](./test-data).
+To install some test data, run: `make install_test_data`. It will download several test images to [test-data](./test-data).
+The default configuration of ssl-vision will peak this up automatically.
 
 ## Supported cameras
 
@@ -45,7 +46,7 @@ Multiple cameras are supported:
  * 1394B / Firewire 800 (backward compatible with 1394A)
  * Basic usb camera support via the [Video for Linux (V4L)](http://linuxtv.org/downloads/v4l-dvb-apis/) drivers
  * Matrix-Vision BlueFox (USB 2.0) and BlueFox3 (USB 3.0) cameras via [mvIMPACT Acquire SDK](http://www.matrix-vision.com/software-drivers-en.html)
- * Basler cameras via the [Pylon Software Suite](https://www.baslerweb.com/en/products/software/basler-pylon-camera-software-suite/)
+ * Basler cameras via the [Pylon Software Suite](https://www.baslerweb.com/en/products/software/basler-pylon-camera-software-suite/) (currently supports 7.2.1)
  * FLIR cameras via the [SPINNAKER and FLYCAP SDK](https://www.flir.com/support-center/iis/machine-vision/downloads/spinnaker-sdk-flycapture-and-firmware-download/)
  * Hikrobot cameras via [Hikrobot MVS(Machine Vision Software)](https://www.hikrobotics.com/en/machinevision/service/download?module=0)
  
@@ -60,7 +61,7 @@ Then build with the corresponding option:
  * `-DUSE_V4L=true`
  * `-DUSE_HIKMVCAM=true`
  
-Example for a release build: `cd build; cmake -DUSE_SPINNAKER=true ..`.
+Example for a release build: `cmake -B build -DUSE_SPINNAKER=true`.
  As these are cached cmake options, you only need to run this once and can build with `make` afterwards.
 
 ### Virtual Splitter cameras
@@ -93,6 +94,7 @@ sh install_mvBlueFOX.sh -u
 ### Basler cameras
 
 Basler cameras are supported via the [Pylon Software Suite](https://www.baslerweb.com/en/products/software/basler-pylon-camera-software-suite/). 
+[This link](https://www.baslerweb.com/fp-1668420813/media/downloads/software/pylon_software/pylon_7.2.1.25747_x86_64_debs.tar.gz) should directly download the current supported version, 7.2.1.
 Installation instructions are contained in the download. 
 
 Tested with [Basler ace acA1300-75gc](https://www.baslerweb.com/en/products/cameras/area-scan-cameras/ace/aca1300-75gc/). 
@@ -103,7 +105,7 @@ Tested with [Basler ace acA1300-75gc](https://www.baslerweb.com/en/products/came
 USB 3.0 cameras are currently supported.
 
 Tested cameras:
- * Blackfly S (BFS-U3-51S5C-C)
+ * Blackfly S (BFS-U3-51S5C-C) - [Documentation](https://www.flir.de/support-center/iis/machine-vision/knowledge-base/technical-documentation-blackfly-s-usb3/)
  
 Download and install the [SDK](https://www.flir.com/products/spinnaker-sdk) and build ssl-vision with `-DUSE_SPINNAKER=true`.
 
@@ -123,9 +125,7 @@ make
 ```
 If you need to pass extra parameters to cmake, you need to run `cmake` directly:
 ```bash
-cd build
-cmake -DUSE_WHAT_SO_EVER=true ..
-cd ..
+cmake -B build -DUSE_WHAT_SO_EVER=true
 make
 ```
 The `USE_*` parameters are cached, so they do not have to be passed in each time.
