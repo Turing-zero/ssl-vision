@@ -108,6 +108,13 @@ CaptureThread::CaptureThread(int cam_id)
   captureSpinnaker = new CaptureSpinnaker(spinnaker, camId);
 #endif
 
+#ifdef DAHENG
+  captureModule->addItem("Daheng");
+  daheng = new VarList("Daheng");
+  settings->addChild(daheng);
+  captureDaheng = new CaptureDaheng(daheng, camId);
+#endif
+
 #ifdef CAMERA_SPLITTER
   splitter = new VarList("Splitter");
   captureModule->addItem("Splitter");
@@ -174,6 +181,10 @@ CaptureThread::~CaptureThread()
   delete captureSpinnaker;
 #endif
 
+#ifdef DAHENG
+  delete captureDaheng;
+#endif
+
 #ifdef CAMERA_SPLITTER
   delete captureSplitter;
 #endif
@@ -233,6 +244,11 @@ void CaptureThread::selectCaptureMethod() {
 #ifdef SPINNAKER
   else if(captureModule->getString() == "Spinnaker") {
     new_capture = captureSpinnaker;
+  }
+#endif
+#ifdef DAHENG
+  else if (captureModule->getString() == "Daheng"){
+    new_capture = captureDaheng;
   }
 #endif
 #ifdef CAMERA_SPLITTER

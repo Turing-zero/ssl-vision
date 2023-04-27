@@ -11,7 +11,7 @@ This system - named SSL-Vision - is currently developed by volunteers from parti
 
 To find more in-depth and up-to-date information about SSL-Vision (including installation and configuration), 
 please visit the [Wiki Documentation Page](https://github.com/RoboCup-SSL/ssl-vision/wiki).
- 
+
 ## Software Requirements
 
 Following dependencies are required to build the software:
@@ -49,10 +49,11 @@ Multiple cameras are supported:
  * Basler cameras via the [Pylon Software Suite](https://www.baslerweb.com/en/products/software/basler-pylon-camera-software-suite/) (currently supports 7.2.1)
  * FLIR cameras via the [SPINNAKER and FLYCAP SDK](https://www.flir.com/support-center/iis/machine-vision/downloads/spinnaker-sdk-flycapture-and-firmware-download/)
  * Hikrobot cameras via [Hikrobot MVS(Machine Vision Software)](https://www.hikrobotics.com/en/machinevision/service/download?module=0)
- 
+ * DAHENG cameras via [DAHENG Imaging](https://www.daheng-imaging.com/downloads/softwares/)
+
 To enable support for one or more of those cameras, install the corresponding SDK (linked above and described in more details below) first.
 Then build with the corresponding option:
- 
+
  * `-DUSE_DC1394=true`
  * `-DUSE_SPINNAKER=true`
  * `-DUSE_mvIMPACT=true`
@@ -60,7 +61,8 @@ Then build with the corresponding option:
  * `-DUSE_FLYCAP=true`
  * `-DUSE_V4L=true`
  * `-DUSE_HIKMVCAM=true`
- 
+ * `-DUSE_DAHENG=true`
+
 Example for a release build: `cmake -B build -DUSE_SPINNAKER=true`.
  As these are cached cmake options, you only need to run this once and can build with `make` afterwards.
 
@@ -79,11 +81,11 @@ same camera center, which may not work well with some consumers.
 USB 2.0 [BlueFox MLC](https://www.matrix-vision.com/USB2.0-single-board-camera-mvbluefox-mlc.html) and 
 USB 3.0 [BlueFox3-2](https://www.matrix-vision.com/USB3-vision-camera-mvbluefox3-2.html) cameras are supported.
 Please note, that they require different SDKs. The SDK look very similar, but are not compatible. They get installed into the same directory by default.
- 
+
 Tested cameras: 
  * mvBlueFOX-MLC200wC
  * mvBlueFOX3-2089 
- 
+
 The SDK can be downloaded from the [driver page](https://www.matrix-vision.com/software-drivers-en.html). Go to Linux => mvBlueFOX (USB2.0) or mvBlueFOX3 (USB3.0). 
 Download the `install_mvBlueFOX.sh` script and the correct `.tgz` file for your machine. 
 Open a terminal and navigate to your download folder. For a quick installation run:
@@ -106,7 +108,7 @@ USB 3.0 cameras are currently supported.
 
 Tested cameras:
  * Blackfly S (BFS-U3-51S5C-C) - [Documentation](https://www.flir.de/support-center/iis/machine-vision/knowledge-base/technical-documentation-blackfly-s-usb3/)
- 
+
 Download and install the [SDK](https://www.flir.com/products/spinnaker-sdk) and build ssl-vision with `-DUSE_SPINNAKER=true`.
 
 ### HikMV cameras
@@ -116,6 +118,14 @@ USB 3.0 cameras are supported and tested, GigE cameras should be supported too (
 Download the [SDK](https://www.hikrobotics.com/en/machinevision/service/download?module=0), install it using `setup.sh` inside the package and build ssl-vision with `-DUSE_HIKMVCAM=true`
 
 current tested : MVS2.1.2(Linux)
+
+### DAHENG cameras
+
+Download the [SDK](https://www.daheng-imaging.com/downloads/softwares/), execute the `.run` file, a folder containing the SDK should appear under the current folder.
+
+Copy the sdk folder (like `Galaxy_camera`) to `/opt` folder or set `$ENV{DAHENG_SDK_PATH}` to your sdk folder.
+
+Build the ssl-vision with `-DUSE_DAHENG=true`
 
 ## Compilation
 

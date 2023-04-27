@@ -60,6 +60,10 @@
 #include "capture_hikmvcam.h"
 #endif
 
+#ifdef DAHENG
+#include "capture_daheng.h"
+#endif
+
 /*!
   \class   CaptureThread
   \brief   A thread for capturing and processing video data
@@ -85,6 +89,7 @@ protected:
   CaptureInterface * captureSpinnaker = nullptr;
   CaptureInterface * captureSplitter = nullptr;
   CaptureInterface * captureHikMvCam = nullptr;
+  CaptureInterface * captureDaheng = nullptr;
   AffinityManager * affinity;
   FrameBuffer * rb;
   bool _kill;
@@ -99,6 +104,7 @@ protected:
   VarList * fromfile = nullptr;
   VarList * basler = nullptr;
   VarList * spinnaker = nullptr;
+  VarList * daheng = nullptr;
   VarList * splitter = nullptr;
   VarList * hikmvcam = nullptr;
   VarList * control;

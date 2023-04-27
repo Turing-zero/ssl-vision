@@ -8,7 +8,7 @@ set(USE_FLYCAP FALSE CACHE BOOL "Compile with flycap driver (FLIR cameras, prede
 set(USE_V4L TRUE CACHE BOOL "Compile with Video4Linux support (generic webcams)")
 set(USE_SPLITTER FALSE CACHE BOOL "Compile with Camera splitter support (virtual cameras with part of a full image)")
 set(USE_HIKMVCAM FALSE CACHE BOOL "Compile with hikrobot mvs driver (hikrobot mv camera support)")
-
+set(USE_DAHENG FALSE CACHE BOOL "Compile with Daheng driver (DAHENG cameras)")
 if(USE_DC1394 AND USE_mvIMPACT)
 	message(FATAL_ERROR "DC1394 and mvImpact are not compatible: mvImpact crashes when creating device manager")
 endif()
@@ -142,6 +142,19 @@ else()
 	message(STATUS "HikMvCam disabled")
 endif()
 
+if( USE_DAHENG )
+	message(STATUS "With DAHENG")
+	find_package( DAHENG REQUIRED )
+	add_definitions( -DDAHENG )
+	include_directories( ${DAHENG_INCLUDE_DIRS} )
+	set (SHARED_SRCS ${SHARED_SRCS} ${shared_dir}/capture/capture_daheng.cpp)
+	set (SHARED_HEADERS ${SHARED_HEADERS} ${shared_dir}/capture/capture_daheng.h)
+	message(STATUS "DAHENG enabled")
+else()
+	set( DAHENG_LIBS "" )
+	message(STATUS "DAHENG disabled")
+endif()
+
 include_directories(${PROJECT_SOURCE_DIR}/src/app)
 include_directories(${PROJECT_SOURCE_DIR}/src/app/gui)
 include_directories(${PROJECT_SOURCE_DIR}/src/app/plugins)
@@ -270,6 +283,7 @@ set (libs
   ${FLYCAP_LIBS}
   ${SPINNAKER_LIBS}
   ${HIKMVCAM_LIBRARIES}
+  ${DAHENG_LIBS}
   ${V4L_LIBS}
   Eigen3::Eigen
 )
