@@ -33,7 +33,13 @@
 #include "plugin_runlength_encode.h"
 #include "plugin_find_blobs.h"
 #include "plugin_detect_balls.h"
+
+#ifdef USE_TAG_FOR_ROBOT
+#include "plugin_detect_robots_using_tag.h"
+#else
 #include "plugin_detect_robots.h"
+#endif
+
 #include "plugin_sslnetworkoutput.h"
 #include "plugin_publishgeometry.h"
 #include "plugin_legacysslnetworkoutput.h"

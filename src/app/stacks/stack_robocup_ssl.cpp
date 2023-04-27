@@ -73,9 +73,11 @@ StackRoboCupSSL::StackRoboCupSSL(
   stack.push_back(new PluginRunlengthEncode(_fb));
 
   stack.push_back(new PluginFindBlobs(_fb,lut_yuv));
-
+#ifdef USE_TAG_FOR_ROBOT
+  stack.push_back(new PluginDetectRobotsArUco(_fb,lut_yuv,*camera_parameters,*global_field,global_team_selector_blue,global_team_selector_yellow, global_team_settings));
+#else
   stack.push_back(new PluginDetectRobots(_fb,lut_yuv,*camera_parameters,*global_field,global_team_selector_blue,global_team_selector_yellow, global_team_settings));
-
+#endif
   stack.push_back(new PluginDetectBalls(_fb,lut_yuv,*camera_parameters,*global_field,global_ball_settings));
 
   stack.push_back(new PluginAutoColorCalibration(_fb,lut_yuv, (LUTWidget*) pluginColorCalibration->getControlWidget()));

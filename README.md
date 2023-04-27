@@ -127,6 +127,8 @@ Copy the sdk folder (like `Galaxy_camera`) to `/opt` folder or set `$ENV{DAHENG_
 
 Build the ssl-vision with `-DUSE_DAHENG=true`
 
+current tested : `Galaxy_Linux-x86_Gige-U3_32bits-64bits_1.5.2303.9221`
+
 ## Compilation
 
 Build the code by running:

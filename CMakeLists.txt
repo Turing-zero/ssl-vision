@@ -9,6 +9,9 @@ set(USE_V4L TRUE CACHE BOOL "Compile with Video4Linux support (generic webcams)"
 set(USE_SPLITTER FALSE CACHE BOOL "Compile with Camera splitter support (virtual cameras with part of a full image)")
 set(USE_HIKMVCAM FALSE CACHE BOOL "Compile with hikrobot mvs driver (hikrobot mv camera support)")
 set(USE_DAHENG FALSE CACHE BOOL "Compile with Daheng driver (DAHENG cameras)")
+
+set(USE_TAG_FOR_ROBOT FALSE CACHE BOOL "use aruco tags for robot detection instead of color lut.")
+
 if(USE_DC1394 AND USE_mvIMPACT)
 	message(FATAL_ERROR "DC1394 and mvImpact are not compatible: mvImpact crashes when creating device manager")
 endif()
@@ -33,6 +36,17 @@ find_package(Qt5Widgets REQUIRED)
 find_package(Qt5OpenGL REQUIRED)
 # Note: Bluefox SDK is not compatible with some components of OpenCV. Take care when enabling more.
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs )
+
+if( USE_TAG_FOR_ROBOT )
+	message(STATUS "ArUcoTag enabled")
+	add_definitions(-D USE_TAG_FOR_ROBOT)
+	set(DETECT_ROBOTS_SRC src/app/plugins/plugin_detect_robots_using_tag.cpp)
+	find_package(aruco REQUIRED)
+else()
+	message(STATUS "ArUcoTag disabled")
+	set(aruco_LIBS "")
+	set(DETECT_ROBOTS_SRC src/app/plugins/plugin_detect_robots.cpp)
+endif()
 
 include(src/shared/CMakeLists.txt.inc)
 
@@ -183,7 +197,7 @@ set (SRCS ${SRCS}
 	src/app/plugins/plugin_colorcalib.cpp
 	src/app/plugins/plugin_colorthreshold.cpp
 	src/app/plugins/plugin_detect_balls.cpp
-	src/app/plugins/plugin_detect_robots.cpp
+	${DETECT_ROBOTS_SRC}
 	src/app/plugins/plugin_find_blobs.cpp
 	src/app/plugins/plugin_publishgeometry.cpp
 	src/app/plugins/plugin_legacypublishgeometry.cpp
@@ -286,6 +300,7 @@ set (libs
   ${DAHENG_LIBS}
   ${V4L_LIBS}
   Eigen3::Eigen
+  ${aruco_LIBS}
 )
 target_link_libraries(sslvision ${libs} Qt5::Widgets)
 set (libs ${libs} sslvision)

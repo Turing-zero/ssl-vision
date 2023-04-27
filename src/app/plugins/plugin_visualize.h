@@ -60,6 +60,9 @@ protected:
   VarBool * _v_greyscale;
   VarBool * _v_thresholded;
   VarBool * _v_blobs;
+#ifdef USE_TAG_FOR_ROBOT
+  VarBool * _v_robot_tag;
+#endif
   VarBool * _v_camera_calibration;
   VarBool * _v_calibration_result;
   VarBool * _v_complete_sobel;
@@ -108,6 +111,9 @@ protected:
   void DrawSearchCorridors(FrameData* data, VisualizationFrame* vis_frame);
 
   void DrawMaskHull(FrameData* data, VisualizationFrame* vis_frame);
+#ifdef USE_TAG_FOR_ROBOT
+  void DrawTags(FrameData* data, VisualizationFrame* vis_frame);
+#endif
 public:
   PluginVisualize(FrameBuffer* _buffer, const CameraParameters& camera_params,
                   const RoboCupField& real_field, const ConvexHullImageMask &mask);

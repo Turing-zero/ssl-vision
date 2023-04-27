@@ -19,6 +19,9 @@
 */
 //========================================================================
 #include "plugin_visualize.h"
+#ifdef USE_TAG_FOR_ROBOT
+#include "plugin_detect_robots_using_tag.h"
+#endif
 #include <sobel.h>
 #include <opencv2/opencv.hpp>
 #include "convex_hull.h"
@@ -39,6 +42,9 @@ PluginVisualize::PluginVisualize(
   _v_greyscale = new VarBool("greyscale", false);
   _v_thresholded = new VarBool("thresholded", true);
   _v_blobs = new VarBool("blobs", true);
+#ifdef USE_TAG_FOR_ROBOT
+  _v_robot_tag = new VarBool("robot tag", false);
+#endif
   _v_camera_calibration = new VarBool("camera calibration", true);
   _v_calibration_result = new VarBool("calibration result", true);
   _v_detected_edges = new VarBool("detected edges", false);
@@ -53,6 +59,9 @@ PluginVisualize::PluginVisualize(
   _settings->addChild(_v_greyscale);
   _settings->addChild(_v_thresholded);
   _settings->addChild(_v_blobs);
+#ifdef USE_TAG_FOR_ROBOT
+  _settings->addChild(_v_robot_tag);
+#endif
   _settings->addChild(_v_camera_calibration);
   _settings->addChild(_v_calibration_result);
   _settings->addChild(_v_detected_edges);
@@ -385,6 +394,28 @@ void PluginVisualize::DrawMaskHull(
   _image_mask.unlock();
 }
 
+#ifdef USE_TAG_FOR_ROBOT
+void PluginVisualize::DrawTags(
+  FrameData* data, VisualizationFrame* vis_frame){
+  _image_mask.lock();
+
+  TagResults * res = (TagResults *) data->map.get("tag_result");
+  if (res == nullptr) {
+      std::cerr << "err in getting tag result, got nil" << std::endl;
+      return;
+  }
+  for(auto i =0ul;i<res->markerIds.size();i++){
+      auto cen = res->markerCenters[i];
+      auto face_cen = res->markerFaceCenters[i];
+      vis_frame->data.drawLine(cen.x-5,cen.y-5,cen.x+5,cen.y+5,rgb(255,255,255));
+      vis_frame->data.drawLine(cen.x-5,cen.y+5,cen.x+5,cen.y-5,rgb(255,255,255));
+      vis_frame->data.drawString(cen.x,cen.y,"tag:"+std::to_string(res->markerIds[i]),rgb(255,255,255));
+      vis_frame->data.drawLine(cen.x,cen.y,face_cen.x,face_cen.y,rgb(255,0,255));
+  }
+  _image_mask.unlock();
+}
+#endif
+
 ProcessResult PluginVisualize::process(
     FrameData* data, RenderOptions* options) {
   if (data == 0) return ProcessingFailed;
@@ -424,6 +455,12 @@ ProcessResult PluginVisualize::process(
     if (_v_blobs->getBool()) {
       DrawBlobs(data, vis_frame);
     }
+
+#ifdef USE_TAG_FOR_ROBOT
+    if (_v_robot_tag->getBool()) {
+      DrawTags(data, vis_frame);
+    }
+#endif
 
     // Camera calibration
     if (_v_camera_calibration->getBool()) {
