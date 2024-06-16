@@ -50,11 +50,15 @@ CaptureHikMvCam::CaptureHikMvCam(VarList * _settings, int default_camera_id, QOb
     v_gain_auto->addItem(toString(AutoEnum::continuous_));
     v_gain = new VarDouble("Gain [dB]",0,0,48);
     v_frame_rate = new VarDouble("Frame Rate [fps]",74,0,100);
+    v_pixel_format = new VarStringEnum("Pixel Format", PixelFormatToString(SupportPixelFormat::BayerRG));
+    v_pixel_format->addItem(PixelFormatToString(SupportPixelFormat::BayerRG));
+    v_pixel_format->addItem(PixelFormatToString(SupportPixelFormat::UNKNWON));
     camera_params->addChild(v_expose_auto);
     camera_params->addChild(v_exposure);
     camera_params->addChild(v_gain_auto);
     camera_params->addChild(v_gain);
     camera_params->addChild(v_frame_rate);
+    camera_params->addChild(v_pixel_format);
     mvcConnect(camera_params);
     mutex.unlock();
 }
@@ -100,9 +104,18 @@ void CaptureHikMvCam::readParameterValues(VarList * item)
     }else{
         t_gain = stFloatValue.fCurValue;
     }
+    int pixelFormatValue = SupportPixelFormat::UNKNWON;
+    MVCC_ENUMVALUE stEnumPixelFormatValue = { 0 };
+    nRet = m_pcMyCamera->GetEnumValue("PixelFormat", &stEnumPixelFormatValue);
+    if (MV_OK != nRet){
+        fprintf(stderr, "Get PixelFormat fail! nRet [%x]\n", nRet);
+    }else{
+        pixelFormatValue = stEnumPixelFormatValue.nCurValue;
+    }
     mutex.lock();
     v_exposure->setDouble(t_expose);
     v_gain->setDouble(t_gain);
+    v_pixel_format->setString(PixelFormatToString(pixelFormatValue));
     mutex.unlock();
 }
 
@@ -112,10 +125,12 @@ void CaptureHikMvCam::writeParameterValues(VarList * item)
         return;
 
     double t_expose,t_gain,t_frame_rate;
+    int t_pixel_format;
     mutex.lock();
     t_expose = v_exposure->getDouble();
     t_gain = v_gain->getDouble();
     t_frame_rate = v_frame_rate->getDouble();
+    t_pixel_format = toPixelFormatValue(v_pixel_format->getString());
     mutex.unlock();
     int nRet = m_pcMyCamera->SetFloatValue("ExposureTime", t_expose);
     if (MV_OK != nRet){
@@ -129,12 +144,19 @@ void CaptureHikMvCam::writeParameterValues(VarList * item)
     if (MV_OK != nRet){
         fprintf(stderr, "Set AcquisitionFrameRate fail! nRet [%x]", nRet);
     }
+    nRet = m_pcMyCamera->SetEnumValue("PixelFormat", t_pixel_format);
+    if (MV_OK != nRet){
+        fprintf(stderr, "Set PixelFormat fail! nRet [%x]", nRet);
+    }else{
+        std::cout << "Set PixelFormat success! PixelFormat [" << PixelFormatToString(t_pixel_format) << "]" << std::endl;
+    
+    }
 }
 string CaptureHikMvCam::getCaptureMethodName() const {
     return "HikMvCam";
 }
 bool CaptureHikMvCam::startCapture(){ 
-    printf("startCapture\n");
+    std::cout << "start capture" << std::endl;
     cam_id = v_capture_device->getInt();
     if ((cam_id < 0) || (cam_id > m_stDevList.nDeviceNum)){
         fprintf(stderr, "Index out of range!\n");
@@ -182,7 +204,7 @@ bool CaptureHikMvCam::startCapture(){
         return false;
     }
     is_capturing = true;
-    printf("startCapture success\n");
+    std::cout << "startCapture success" << std::endl;
     return true;
 }
 bool CaptureHikMvCam::stopCapture(){
@@ -205,13 +227,21 @@ RawImage CaptureHikMvCam::getFrame(){
     RawImage result;
     int nRet = m_pcMyCamera->GetImageBuffer(&m_stFrame, 1000);
     if (MV_OK == nRet){
-        result.setColorFormat(COLOR_YUV422_YUYV);
+        int pixelSize = m_stFrame.stFrameInfo.nFrameLen/(m_stFrame.stFrameInfo.nWidth*m_stFrame.stFrameInfo.nHeight);
+        if(pixelSize != 1){
+            std::cout << "PixelType current not support -  pixelSize [" << pixelSize << "]" << std::endl;
+            std::cout << "Got Frame PixelFormat[" << m_stFrame.stFrameInfo.enPixelType << "], PixelSize  " << pixelSize << std::endl;
+            return result;
+        }
+        result.setColorFormat(COLOR_RAW8);
         result.setWidth(m_stFrame.stFrameInfo.nWidth);
         result.setHeight(m_stFrame.stFrameInfo.nHeight);
         result.setData(m_stFrame.pBufAddr);
         timeval tv{};
         gettimeofday(&tv, nullptr);
         result.setTime((double)tv.tv_sec + (double)tv.tv_usec * (1.0E-6));
+    }else{
+        std::cout << "Get One Frame fail! nRet [" << nRet << "]" << std::endl;
     }
     return result;
 }
@@ -227,15 +257,16 @@ bool CaptureHikMvCam::resetBus(){
 }
 bool CaptureHikMvCam::copyAndConvertFrame(const RawImage & src, RawImage & target){
     mutex.lock();
-    if (src.getTime() == 0) {
+    if (src.getTime() == 0 || src.getData() == nullptr || src.getWidth() == 0 || src.getHeight() == 0){
+        std::cout << "copyAndConvertFrame fail! src is empty" << std::endl;
         mutex.unlock();
         return false;
     }
     target.setTime(src.getTime());
     target.ensure_allocation(COLOR_RGB8, src.getWidth(), src.getHeight());
-    cv::Mat srcMat(src.getHeight(), src.getWidth(), CV_8UC2, src.getData());
+    cv::Mat srcMat(src.getHeight(), src.getWidth(), CV_8UC1, src.getData());
     cv::Mat dstMat(target.getHeight(), target.getWidth(), CV_8UC3, target.getData());
-    cv::cvtColor(srcMat, dstMat, cv::COLOR_YUV2RGB_YUYV);
+    cv::cvtColor(srcMat, dstMat, cv::COLOR_BayerRG2BGR);
     target.setColorFormat(COLOR_RGB8);
     mutex.unlock();
     return true;

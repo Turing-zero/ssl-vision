@@ -47,6 +47,7 @@ protected:
     VarStringEnum* v_gain_auto;
     VarDouble* v_gain;
     VarDouble* v_frame_rate;
+    VarStringEnum* v_pixel_format;
     // TODO white balance
     // TODO cache node number
     // TODO pixel format
@@ -90,6 +91,24 @@ public:
 
     string getCaptureMethodName() const override;
 private:
+    enum SupportPixelFormat{
+        BayerRG = MvGvspPixelType::PixelType_Gvsp_BayerRG8,
+        UNKNWON = MvGvspPixelType::PixelType_Gvsp_Undefined
+    };
+    static string PixelFormatToString(int e){
+        switch(e){
+        case BayerRG:
+            return "BayerRG";
+        default:
+            return "unknown";
+        }
+    }
+    static int toPixelFormatValue(const string & s){
+        if(s == "BayerRG")
+            return SupportPixelFormat::BayerRG;
+        else
+            return SupportPixelFormat::UNKNWON;
+    }
     enum AutoEnum{manual_ = 0, once_ = 1, continuous_ = 2};
     static string toString(AutoEnum e){
         switch(e){
