@@ -16,8 +16,6 @@
 #include <string>
 #include <QThread>
 #include <opencv2/opencv.hpp>
-#define MUTEX_LOCK mutex.lock()
-#define MUTEX_UNLOCK mutex.unlock()
 
 bool DahengInitManager::is_registered = false;
 int DahengInitManager::register_count = 0;
@@ -233,9 +231,6 @@ bool CaptureDaheng::_setCamera()
 		DahengInitManager::unregister_capture();
 		return false;
 	}
-
-	//Set buffer quantity of acquisition queue
-	// uint64_t nBufferNum = ACQ_BUFFER_NUM;
 	DahengInitManager::emStatus = GXSetAcqusitionBufferNumber(camera, ACQ_BUFFER_NUM);
 	if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
 	{
@@ -287,43 +282,41 @@ bool CaptureDaheng::_setCamera()
 	// GX_VERIFY_EXIT(emStatus);
 }
 
-bool CaptureDaheng::startCapture()
-{
-	//std::cout << __FUNCTION__ << " Starts.." << std::endl;
-	MUTEX_LOCK;
-
-	try
+bool CaptureDaheng::startCapture(){
 	{
-		if (camera == NULL)
+		std::unique_lock<std::mutex> lock(_mutex);
+
+		try
 		{
-			if (!_buildCamera() || !_getColorFilter())
+			if (camera == NULL)
 			{
-				// Did not make a camera!
-				// delete camera;
-				camera = NULL;
+				if (!_buildCamera() || !_getColorFilter())
+				{
+					// Did not make a camera!
+					// delete camera;
+					camera = NULL;
+					return false;
+				}
+			}
+			//Device start acquisition
+			// //std::cout << __FUNCTION__ << " Camera Open.." << std::endl;
+			DahengInitManager::emStatus = GXStreamOn(camera);
+			// //std::cout << __FUNCTION__ << " Camera Stream On.." << std::endl;
+			if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
+			{
+				//Release the memory allocated
+				_freeImageBuf();
+				GXCloseDevice(camera);
+				DahengInitManager::unregister_capture();
 				return false;
 			}
 		}
-		//Device start acquisition
-		// //std::cout << __FUNCTION__ << " Camera Open.." << std::endl;
-		DahengInitManager::emStatus = GXStreamOn(camera);
-		// //std::cout << __FUNCTION__ << " Camera Stream On.." << std::endl;
-		if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
+		catch (...)
 		{
-			//Release the memory allocated
-			_freeImageBuf();
-			GXCloseDevice(camera);
-			DahengInitManager::unregister_capture();
+			printf("Uncaught exception at line 241\n");
 			return false;
 		}
 	}
-	catch (...)
-	{
-		printf("Uncaught exception at line 241\n");
-		MUTEX_UNLOCK;
-		return false;
-	}
-	MUTEX_UNLOCK;
 	writeParameterValues(this->settings);
 	std::cout << __FUNCTION__ << " end..." << std::endl;
 	return true;
@@ -351,7 +344,7 @@ bool CaptureDaheng::_stopCapture()
 
 bool CaptureDaheng::stopCapture()
 {
-	MUTEX_LOCK;
+	std::unique_lock<std::mutex> lock(_mutex);
 	bool stopped;
 	try
 	{
@@ -366,16 +359,14 @@ bool CaptureDaheng::stopCapture()
 	catch (...)
 	{
 		printf("Uncaught exception at line 288\n");
-		MUTEX_UNLOCK;
 		throw;
 	}
-	MUTEX_UNLOCK;
 	return stopped;
 }
 
 void CaptureDaheng::releaseFrame()
 {
-	MUTEX_LOCK;
+	std::unique_lock<std::mutex> lock(_mutex);
 	try
 	{
 		// raw8_image_buf, rgb_image_buf are global buffer, do not need to release per frame
@@ -387,15 +378,13 @@ void CaptureDaheng::releaseFrame()
 	}
 	catch (...)
 	{
-		MUTEX_UNLOCK;
 		throw;
 	}
-	MUTEX_UNLOCK;
 }
 
 RawImage CaptureDaheng::getFrame()
 {
-	MUTEX_LOCK;
+	std::unique_lock<std::mutex> lock(_mutex);
 	RawImage img;
 	img.setWidth(0);
 	img.setHeight(0);
@@ -405,92 +394,34 @@ RawImage CaptureDaheng::getFrame()
 		timeval tv;
 		gettimeofday(&tv, 0);
 		img.setTime((double)tv.tv_sec + (tv.tv_usec / 1000000.0));
-
-		// Keep grabbing in case of partial grabs
-		int fail_count = 0;
-		while (fail_count < 10)
+		try
 		{
-			try
-			{
-				// Get a frame from Queue
-				DahengInitManager::emStatus = GXDQBuf(camera, &frame_buffer, 1000);
-				if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-				{
-					if (DahengInitManager::emStatus == GX_STATUS_TIMEOUT)
-					{
-						printf("Grab frame timeout.\n");
-						fail_count++;
-						continue;
-					}
-				}
-
-				if (frame_buffer->nStatus != GX_FRAME_STATUS_SUCCESS)
-				{
-					printf("<Abnormal Acquisition: Exception code: %d>\n", frame_buffer->nStatus);
-					fail_count++;
-				}
-				else
-				{
-					// Acquisition success, then format converter
-					if (_convertFormat(frame_buffer))
-					{
-						cv::Mat img_temp;
-						cv::Mat image_one;
-						image_one.create(frame_buffer->nHeight,frame_buffer->nWidth, CV_8UC3);
-
-						// std::cout << "frame_buffer->nHeight: " << frame_buffer->nHeight << std::endl;
-						// std::cout << "frame_buffer->nWidth: " << frame_buffer->nWidth << std::endl;
-
-						memcpy(image_one.data, rgb_image_buf, frame_buffer->nWidth*frame_buffer->nHeight*3);
-						
-						// cv::Mat image_one(cv::Size(1280, 1024), CV_8UC3, rgb_image_buf);
-						// cv::cvtColor(image_one, image_one, cv::COLOR_BayerRG2RGB);
-						// cv::resize(image_one, img_temp, cv::Size(image_one.cols/1.6, image_one.rows/1.6));
-						// std::cout << "image_one.cols: " << image_one.cols << std::endl;
-						// std::cout << "image_one.rows: " << image_one.rows << std::endl;
-						int scale = 2;
-						int cv_width = static_cast<int>(3088/scale);
-						int cv_height = static_cast<int>(2064/scale);
-						cv::resize(image_one, img_temp, cv::Size(cv_width, cv_height));
-						
-						//  cv::namedWindow("image", CV_WINDOW);
-						// cv::imshow("image", img_temp);
-						// cv::waitKey(0);
-						img.setWidth(cv_width);
-						img.setHeight(cv_height);
-						// rgb_image_buf is malloced before startstream
-						// unsigned char* buf = (unsigned char*) malloc(capture.GetImageSize());
-						// memcpy(buf, capture.GetBuffer(), capture.GetImageSize());
-						// img.setData(img_temp.data);
-						img.ensure_allocation(COLOR_RGB8, img.getWidth(), img.getHeight());
-						memcpy(img.getData(), img_temp.data, img.getNumBytes());
-						image_one.release();
-						img_temp.release();
-						// delete []rgb_image_buf;
-						// last_buf = buf;
-						fail_count = 11;
-					}
-					else
-					{
-						printf("Format Convert failed!\n");
-						fail_count++;
-					}
-				}
-				// release frame_buffer for continuous grab
+			DahengInitManager::emStatus = GXDQBuf(camera, &frame_buffer, 1000);
+			if (DahengInitManager::emStatus != GX_STATUS_SUCCESS){
+				printf("<Abnormal Acquisition in get data: Exception code: %d>\n", frame_buffer->nStatus);
+				return img;
+			}
+			if (frame_buffer->nStatus != GX_FRAME_STATUS_SUCCESS){
+				printf("<Abnormal Acquisition in frame_buffer: Exception code: %d>\n", frame_buffer->nStatus);
+				return img;
+			}
+			// Acquisition success, then format converter
+			if (!_convertFormat(frame_buffer)){
 				DahengInitManager::emStatus = GXQBuf(camera, frame_buffer);
+				printf("<Abnormal Acquisition in convertFormat: Exception code: %d>\n", frame_buffer->nStatus);
+				return img;
 			}
-			catch (...)
-			{
-				fprintf(stderr, "Timeout expired in CaptureDaheng::getFrame\n");
-				// MUTEX_UNLOCK;
-				// return img;
-				fail_count++;
-			}
+			img.setWidth(frame_buffer->nWidth);
+			img.setHeight(frame_buffer->nHeight);
+			img.setColorFormat(COLOR_RGB8);
+			img.setData(rgb_image_buf);
+
+			// release frame_buffer for continuous grab
+			DahengInitManager::emStatus = GXQBuf(camera, frame_buffer);
 		}
-		if (fail_count == 10)
+		catch (...)
 		{
-			fprintf(stderr, "Maximum retry count for image grabbing (%d) exceeded in capture_daheng", fail_count);
-			MUTEX_UNLOCK;
+			fprintf(stderr, "Timeout expired in CaptureDaheng::getFrame\n");
 			return img;
 		}
 	}
@@ -498,10 +429,8 @@ RawImage CaptureDaheng::getFrame()
 	{
 		// Make sure the mutex is unlocked before propagating
 		printf("Uncaught exception!\n");
-		MUTEX_UNLOCK;
 		throw;
 	}
-	MUTEX_UNLOCK;
 	return img;
 }
 
@@ -601,7 +530,7 @@ string CaptureDaheng::getCaptureMethodName() const
 
 bool CaptureDaheng::copyAndConvertFrame(const RawImage &src, RawImage &target)
 {
-	MUTEX_LOCK;
+	std::unique_lock<std::mutex> lock(_mutex);
 	try
 	{
 		target.ensure_allocation(src.getColorFormat(), src.getWidth(), src.getHeight());
@@ -610,21 +539,14 @@ bool CaptureDaheng::copyAndConvertFrame(const RawImage &src, RawImage &target)
 	}
 	catch (...)
 	{
-		MUTEX_UNLOCK;
 		throw;
 	}
-	MUTEX_UNLOCK;
 	return true;
 }
 
 void CaptureDaheng::readAllParameterValues()
 {
-	MUTEX_LOCK;
-	// if(is_param_recoved == false)
-	// {
-	// 	MUTEX_UNLOCK;
-	// 	return;
-	// }
+	std::unique_lock<std::mutex> lock(_mutex);
 	try
 	{
 		if (camera == NULL)
@@ -816,10 +738,8 @@ void CaptureDaheng::readAllParameterValues()
 	catch (...)
 	{
 		fprintf(stderr, "Exception reading parameter values: \n");
-		MUTEX_UNLOCK;
 		throw;
 	}
-	MUTEX_UNLOCK;
 }
 
 void CaptureDaheng::resetCamera(unsigned int new_id)
@@ -941,11 +861,10 @@ void CaptureDaheng::resetCamera(unsigned int new_id)
 
 void CaptureDaheng::writeParameterValues(VarList *vars)
 {
-	MUTEX_LOCK;
+	std::unique_lock<std::mutex> lock(_mutex);
 	if (vars != this->settings)
 	{
 		//std::cout << __FUNCTION__ << "vars != this->settings" << std::endl;
-		MUTEX_UNLOCK;
 		return;
 	}
 	// else
@@ -1111,13 +1030,8 @@ void CaptureDaheng::writeParameterValues(VarList *vars)
 	catch (...)
 	{
 		fprintf(stderr, "Error writing parameter values.\n");
-		MUTEX_UNLOCK;
 		throw;
 	}
-	MUTEX_UNLOCK;
-	//if (restart) {
-	//	startCapture();
-	//}
 }
 
 void CaptureDaheng::mvc_connect(VarList *group)

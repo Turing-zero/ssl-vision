@@ -3,13 +3,13 @@ cmake_minimum_required(VERSION 3.16.3)
 project(ssl-vision)
 
 set(OpenGL_GL_PREFERENCE LEGACY)
-set(USE_DC1394 TRUE CACHE BOOL "Compile with DC1394 driver (firewire cameras)")
+set(USE_DC1394 FALSE CACHE BOOL "Compile with DC1394 driver (firewire cameras)")
 set(USE_SPINNAKER FALSE CACHE BOOL "Compile with Spinnaker driver (FLIR cameras)")
 set(USE_mvIMPACT FALSE CACHE BOOL "Compile with mvImpact driver (bluefox USB2 + USB3 cameras)")
 set(USE_PYLON FALSE CACHE BOOL "Compile with pylon driver (Basler cameras)")
 set(USE_FLYCAP FALSE CACHE BOOL "Compile with flycap driver (FLIR cameras, predecessor of Spinnaker)")
-set(USE_V4L TRUE CACHE BOOL "Compile with Video4Linux support (generic webcams)")
-set(USE_SPLITTER FALSE CACHE BOOL "Compile with Camera splitter support (virtual cameras with part of a full image)")
+set(USE_V4L FALSE CACHE BOOL "Compile with Video4Linux support (generic webcams)")
+set(USE_SPLITTER TRUE CACHE BOOL "Compile with Camera splitter support (virtual cameras with part of a full image)")
 set(USE_HIKMVCAM FALSE CACHE BOOL "Compile with hikrobot mvs driver (hikrobot mv camera support)")
 set(USE_DAHENG FALSE CACHE BOOL "Compile with Daheng driver (DAHENG cameras)")
 
@@ -272,7 +272,7 @@ qt5_add_resources(SHARED_RC_SRCS
 )
 
 # enable warnings
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-deprecated-declarations")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -Wall -Wno-deprecated-declarations")
 
 #flags to set in debug mode
 set (CMAKE_CXX_FLAGS_DEBUG "-g -Wl,--no-as-needed")

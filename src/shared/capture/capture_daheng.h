@@ -17,7 +17,7 @@
 #include <sys/time.h>
 #include <GxIAPI.h>
 #include <DxImageProc.h>
-#include <QMutex>
+#include <mutex>
 #include "VarTypes.h"
 
 #define ACQ_BUFFER_NUM 5			  // Acquisition Buffer Qty.
@@ -43,7 +43,7 @@ public slots:
 	void changed(VarType *group);
 
 private:
-	QMutex mutex;
+	std::mutex _mutex;
 
 public:
 	CaptureDaheng(VarList *_settings = nullptr, unsigned int _camera_id = 0, QObject *parent = nullptr);
