@@ -96,6 +96,7 @@ private:
 	VarBool *v_auto_exposure;
 	VarDouble *v_exposure_time;
 	VarStringEnum *v_color_mode;
+	VarDouble *v_target_fps;
 	// double f_balance_ratio_red;
 	// double f_balance_ratio_green;
 	// double f_balance_ratio_blue;

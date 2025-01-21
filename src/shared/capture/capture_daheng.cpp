@@ -94,6 +94,8 @@ CaptureDaheng::CaptureDaheng(VarList *_settings, unsigned int _camera_id, QObjec
 	v_color_mode->addItem(Colors::colorFormatToString(COLOR_RGB8));
 	vars->addChild(v_color_mode);
 
+	vars->addChild(v_target_fps = new VarDouble("Target FPS", (int)75, 10, 100));
+
 	vars->addChild(v_camera_id = new VarInt("Camera ID", (int)camera_id, 0, 3));
 
 	v_auto_balance = new VarBool("auto balance", false);
@@ -216,6 +218,22 @@ bool CaptureDaheng::_setCamera()
 {
 	//Set acquisition mode
 	DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_ACQUISITION_MODE, GX_ACQ_MODE_CONTINUOUS);
+	if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
+	{
+		GXCloseDevice(camera);
+		DahengInitManager::unregister_capture();
+		return false;
+	}
+	//Set GX_ENUM_ACQUISITION_FRAME_RATE_MODE
+	DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_ACQUISITION_FRAME_RATE_MODE, GX_ACQUISITION_FRAME_RATE_MODE_ON);
+	if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
+	{
+		GXCloseDevice(camera);
+		DahengInitManager::unregister_capture();
+		return false;
+	}
+	//Set GX_ENUM_DEVICE_LINK_THROUGHPUT_LIMIT_MODE off
+	DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_DEVICE_LINK_THROUGHPUT_LIMIT_MODE, GX_DEVICE_LINK_THROUGHPUT_LIMIT_MODE_OFF);
 	if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
 	{
 		GXCloseDevice(camera);
@@ -630,6 +648,13 @@ void CaptureDaheng::readAllParameterValues()
 		{
 			printf("Get gain value failed.\n");
 		}
+		double frame_rate;
+		DahengInitManager::emStatus = GXGetFloat(camera, GX_FLOAT_ACQUISITION_FRAME_RATE, &frame_rate);
+		if (DahengInitManager::emStatus == GX_STATUS_SUCCESS){
+			v_target_fps->setDouble(frame_rate);
+		}else{
+			printf("Get frame rate value failed.\n");
+		}
 		// DahengInitManager::emStatus = GXSetBool(camera, GX_BOOL_GAMMA_ENABLE, true);
 		// if(DahengInitManager::emStatus == GX_STATUS_SUCCESS)
 		// {
@@ -1020,6 +1045,9 @@ void CaptureDaheng::writeParameterValues(VarList *vars)
 					printf("Set exposure time failed.\n");
 				}
 			}
+
+			DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_ACQUISITION_FRAME_RATE, v_target_fps->getDouble());
+
 		}
 		// DahengInitManager::emStatus = GXStreamOn(camera);
 		// if(DahengInitManager::emStatus == GX_STATUS_SUCCESS)

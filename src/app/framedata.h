@@ -25,6 +25,8 @@
 #include "ringbuffer.h"
 #include "rawimage.h"
 #include <map>
+#include <mutex>
+#include <shared_mutex>
 using namespace std;
 
 /*!
@@ -40,19 +42,26 @@ class FrameDataMap : protected map<string,void *>
 {
 public:
   void * get(const string & label) const {
+    std::shared_lock lock(map_mutex);
     map<string,void *>::const_iterator iter = map<string,void *>::find(label);
     if (iter==map<string,void *>::end()) return 0;
     return iter->second;
   }
   void * insert(const string & label, void * item) {
+    std::unique_lock lock(map_mutex);
     pair< map<string,void *>::iterator, bool > pair = map<string,void *>::insert ( make_pair(label,item) );
     if (pair.first==map<string,void *>::end()) return 0;
     return pair.first->second;
   }
   void * update(const string & label, void * item) {
-    erase(label);
+    {
+      std::unique_lock lock(map_mutex);
+      erase(label);
+    }
     return insert(label, item);
   }
+private:
+  mutable std::shared_mutex map_mutex;
 };
 
 /*!
