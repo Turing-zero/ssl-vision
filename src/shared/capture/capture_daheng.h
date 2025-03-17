@@ -20,7 +20,7 @@
 #include <mutex>
 #include "VarTypes.h"
 
-#define ACQ_BUFFER_NUM 5			  // Acquisition Buffer Qty.
+#define ACQ_BUFFER_NUM 2			  // Acquisition Buffer Qty.
 #define ACQ_TRANSFER_SIZE (64 * 1024) // Size of data transfer block
 #define ACQ_TRANSFER_NUMBER_URB 64	  // Qty. of data transfer block
 
