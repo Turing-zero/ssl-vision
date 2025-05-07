@@ -20,10 +20,6 @@
 #include <mutex>
 #include "VarTypes.h"
 
-#define ACQ_BUFFER_NUM 2			  // Acquisition Buffer Qty.
-#define ACQ_TRANSFER_SIZE (64 * 1024) // Size of data transfer block
-#define ACQ_TRANSFER_NUMBER_URB 64	  // Qty. of data transfer block
-
 class DahengInitManager
 {
 public:
@@ -67,17 +63,22 @@ public:
 	void readAllParameterValues();
 
 	void writeParameterValues(VarList *vars);
-	// void writeParameterValues();
+	
+	bool setAcquisitionBufferNum();
+	
+	bool prepareForShowImg();
 
 private:
 	bool is_capturing;
 	bool ignore_capture_failure;
 	GX_DEV_HANDLE camera;			   // Device handle, Pointer
-	PGX_FRAME_BUFFER frame_buffer;	   // Raw Frame Buffer, Pointer
+	PGX_FRAME_BUFFER* frame_buffers;   ///< Array of PGX_FRAME_BUFFER
+	uint64_t cam_acquisition_buffer_num; ///< Acquisition buffer number
+	uint32_t cam_frame_count;///< Acquisition frame count
+	uint32_t cam_frame_num; /// use in GXDQAllBufs
 	int64_t color_filter;			   // Color filter of device
 	unsigned char *rgb_image_buf;	   // Memory for RAW8toRGB24
 	unsigned char *raw8_image_buf;	   // Memory for RAW16toRAW8
-	int64_t payload_size;			   // Payload size
 	unsigned int camera_id;			   // Camera ID
 	unsigned char *last_buf;
 
@@ -97,6 +98,8 @@ private:
 	VarDouble *v_exposure_time;
 	VarStringEnum *v_color_mode;
 	VarDouble *v_target_fps;
+	VarBool *v_limit_mode;
+	VarStringEnum *v_buffer_mode;
 	// double f_balance_ratio_red;
 	// double f_balance_ratio_green;
 	// double f_balance_ratio_blue;
@@ -112,6 +115,29 @@ private:
 	bool _setCamera();
 	bool _getColorFilter();
 	bool _convertFormat(PGX_FRAME_BUFFER frame_buf);
+
+	static string toString(GX_DS_STREAM_BUFFER_HANDLING_MODE_ENTRY e) {
+		switch (e) {
+		case GX_DS_STREAM_BUFFER_HANDLING_MODE_OLDEST_FIRST:
+			return "OldestFirst";
+		case GX_DS_STREAM_BUFFER_HANDLING_MODE_OLDEST_FIRST_OVERWRITE:
+			return "OldestOverwrite";
+		case GX_DS_STREAM_BUFFER_HANDLING_MODE_NEWEST_ONLY:
+			return "NewestOnly";
+		default:
+			return "OldestFirst";
+		}
+	}
+	static GX_DS_STREAM_BUFFER_HANDLING_MODE_ENTRY stringToBufferMode(const char *s) {
+		if (strcmp(s, "OldestFirst") == 0) {
+			return GX_DS_STREAM_BUFFER_HANDLING_MODE_OLDEST_FIRST;
+		} else if (strcmp(s, "OldestOverwrite") == 0) {
+			return GX_DS_STREAM_BUFFER_HANDLING_MODE_OLDEST_FIRST_OVERWRITE;
+		} else if (strcmp(s, "NewestOnly") == 0) {
+			return GX_DS_STREAM_BUFFER_HANDLING_MODE_NEWEST_ONLY;
+		}
+		return GX_DS_STREAM_BUFFER_HANDLING_MODE_OLDEST_FIRST;
+	}
 
 // A slight blur helps to reduce noise and improve color recognition.
 #ifdef OPENCV

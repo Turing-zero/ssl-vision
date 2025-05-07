@@ -17,6 +17,9 @@
 #include <QThread>
 #include <opencv2/opencv.hpp>
 
+#define ACQ_TRANSFER_SIZE (64 * 1024) // Size of data transfer block
+#define ACQ_TRANSFER_NUMBER_URB 64	  // Qty. of data transfer block
+
 bool DahengInitManager::is_registered = false;
 int DahengInitManager::register_count = 0;
 GX_STATUS DahengInitManager::emStatus = GX_STATUS_SUCCESS;
@@ -72,8 +75,10 @@ void DahengInitManager::unregister_capture()
 	}
 }
 
-CaptureDaheng::CaptureDaheng(VarList *_settings, unsigned int _camera_id, QObject *_parent) : QObject(_parent), CaptureInterface(_settings)
-{
+CaptureDaheng::CaptureDaheng(VarList *_settings, unsigned int _camera_id, QObject *_parent) : QObject(_parent), CaptureInterface(_settings), frame_buffers(nullptr)
+, cam_acquisition_buffer_num(0)
+, cam_frame_count(0)
+, cam_frame_num(0){
 	//std::cout << __FUNCTION__ << " starts..." << std::endl;
 	is_capturing = false;
 	// is_param_recoved = false;
@@ -95,6 +100,14 @@ CaptureDaheng::CaptureDaheng(VarList *_settings, unsigned int _camera_id, QObjec
 	vars->addChild(v_color_mode);
 
 	vars->addChild(v_target_fps = new VarDouble("Target FPS", (int)75, 10, 100));
+
+	vars->addChild(v_limit_mode = new VarBool("limit mode", false));
+
+	// v_buffer_mode = new VarStringEnum("buffer mode", toString(GX_DS_STREAM_BUFFER_HANDLING_MODE_OLDEST_FIRST));
+	// v_buffer_mode->addItem(toString(GX_DS_STREAM_BUFFER_HANDLING_MODE_OLDEST_FIRST));
+	// v_buffer_mode->addItem(toString(GX_DS_STREAM_BUFFER_HANDLING_MODE_OLDEST_FIRST_OVERWRITE));
+	// v_buffer_mode->addItem(toString(GX_DS_STREAM_BUFFER_HANDLING_MODE_NEWEST_ONLY));
+	// vars->addChild(v_buffer_mode);
 
 	vars->addChild(v_camera_id = new VarInt("Camera ID", (int)camera_id, 0, 3));
 
@@ -137,6 +150,9 @@ CaptureDaheng::CaptureDaheng(VarList *_settings, unsigned int _camera_id, QObjec
 
 CaptureDaheng::~CaptureDaheng()
 {
+	_freeImageBuf();
+	GXCloseDevice(camera);
+	DahengInitManager::unregister_capture();
 	vars->deleteAllChildren();
 }
 
@@ -181,19 +197,48 @@ bool CaptureDaheng::_buildCamera()
 	return false;
 }
 
-bool CaptureDaheng::_mallocImageBuf()
-{
-	DahengInitManager::emStatus = GXGetInt(camera, GX_INT_PAYLOAD_SIZE, &payload_size);
-	if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
+bool CaptureDaheng::_mallocImageBuf(){
+	int64_t i64PayloadSize = 0;
 	{
-		GXCloseDevice(camera);
-		DahengInitManager::unregister_capture();
-		return false;
+		uint64_t ui64BufferNum = 0;
+		// Get device current payload size
+		DahengInitManager::emStatus = GXGetInt(camera, GX_INT_PAYLOAD_SIZE, &i64PayloadSize);
+		if (DahengInitManager::emStatus != GX_STATUS_SUCCESS){
+			printf("Get GX_INT_PAYLOAD_SIZE Failed!\n");
+			GXCloseDevice(camera);
+			DahengInitManager::unregister_capture();
+			return false;
+		}
+		// Set buffer quantity of acquisition queue
+		if (i64PayloadSize == 0){
+			printf("Set Buffer Number - Set acquisiton buffer number failed : Payload size is 0 !");
+			GXCloseDevice(camera);
+			DahengInitManager::unregister_capture();
+			return false;
+		}
+
+		// Calculate a reasonable number of Buffers for different payload size
+		// Small ROI and high frame rate will requires more acquisition Buffer
+		const size_t MAX_MEMORY_SIZE = 8 * 1024 * 1024; // The maximum number of memory bytes available for allocating frame Buffer
+		const size_t MIN_BUFFER_NUM  = 8;               // Minimum frame Buffer number
+		const size_t MAX_BUFFER_NUM  = 450;             // Maximum frame Buffer number
+		ui64BufferNum = MAX_MEMORY_SIZE / i64PayloadSize;
+		ui64BufferNum = (ui64BufferNum <= MIN_BUFFER_NUM) ? MIN_BUFFER_NUM : ui64BufferNum;
+		ui64BufferNum = (ui64BufferNum >= MAX_BUFFER_NUM) ? MAX_BUFFER_NUM : ui64BufferNum;
+
+		DahengInitManager::emStatus = GXSetAcqusitionBufferNumber(camera, ui64BufferNum);
+		if (DahengInitManager::emStatus != GX_STATUS_SUCCESS){
+			printf("GXSetAcqusitionBufferNumber failed\n");
+			return false;
+		}
+		// Transfer buffer number to acquisition thread class for using GXDQAllBufs
+		cam_acquisition_buffer_num = ui64BufferNum;
 	}
 	// free before malloc
 	_freeImageBuf();
-	rgb_image_buf = new unsigned char[payload_size * 3];
-	raw8_image_buf = new unsigned char[payload_size];
+	rgb_image_buf = new unsigned char[i64PayloadSize * 3];
+	raw8_image_buf = new unsigned char[i64PayloadSize];
+	frame_buffers = new PGX_FRAME_BUFFER[cam_acquisition_buffer_num];
 	return true;
 }
 
@@ -210,6 +255,10 @@ bool CaptureDaheng::_freeImageBuf()
 		delete[] raw8_image_buf;
 		raw8_image_buf = NULL;
 	}
+	if(frame_buffers != NULL){
+		delete[] frame_buffers;
+		frame_buffers = NULL;
+	}
 
 	return true;
 }
@@ -218,6 +267,14 @@ bool CaptureDaheng::_setCamera()
 {
 	//Set acquisition mode
 	DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_ACQUISITION_MODE, GX_ACQ_MODE_CONTINUOUS);
+	if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
+	{
+		GXCloseDevice(camera);
+		DahengInitManager::unregister_capture();
+		return false;
+	}
+	//Set trigger mode
+	DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_TRIGGER_MODE, GX_TRIGGER_MODE_OFF);
 	if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
 	{
 		GXCloseDevice(camera);
@@ -234,22 +291,6 @@ bool CaptureDaheng::_setCamera()
 	}
 	//Set GX_ENUM_DEVICE_LINK_THROUGHPUT_LIMIT_MODE off
 	DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_DEVICE_LINK_THROUGHPUT_LIMIT_MODE, GX_DEVICE_LINK_THROUGHPUT_LIMIT_MODE_OFF);
-	if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-	{
-		GXCloseDevice(camera);
-		DahengInitManager::unregister_capture();
-		return false;
-	}
-
-	//Set trigger mode
-	DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_TRIGGER_MODE, GX_TRIGGER_MODE_OFF);
-	if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-	{
-		GXCloseDevice(camera);
-		DahengInitManager::unregister_capture();
-		return false;
-	}
-	DahengInitManager::emStatus = GXSetAcqusitionBufferNumber(camera, ACQ_BUFFER_NUM);
 	if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
 	{
 		GXCloseDevice(camera);
@@ -316,6 +357,7 @@ bool CaptureDaheng::startCapture(){
 					return false;
 				}
 			}
+			writeParameterValues(this->settings);
 			//Device start acquisition
 			// //std::cout << __FUNCTION__ << " Camera Open.." << std::endl;
 			DahengInitManager::emStatus = GXStreamOn(camera);
@@ -335,7 +377,6 @@ bool CaptureDaheng::startCapture(){
 			return false;
 		}
 	}
-	writeParameterValues(this->settings);
 	std::cout << __FUNCTION__ << " end..." << std::endl;
 	return true;
 }
@@ -414,18 +455,20 @@ RawImage CaptureDaheng::getFrame()
 		img.setTime((double)tv.tv_sec + (tv.tv_usec / 1000000.0));
 		try
 		{
-			DahengInitManager::emStatus = GXDQBuf(camera, &frame_buffer, 1000);
+			// GXGetBufferLength
+			DahengInitManager::emStatus = GXDQAllBufs(camera, frame_buffers, cam_acquisition_buffer_num, &cam_frame_num, 1000);
 			if (DahengInitManager::emStatus != GX_STATUS_SUCCESS){
-				printf("<Abnormal Acquisition in get data: Exception code: %d>\n", frame_buffer->nStatus);
+				printf("<Abnormal Acquisition in GXDQAllBufs: Exception code: %d>\n", DahengInitManager::emStatus);
 				return img;
 			}
+			auto frame_buffer = frame_buffers[cam_frame_num-1];
 			if (frame_buffer->nStatus != GX_FRAME_STATUS_SUCCESS){
 				printf("<Abnormal Acquisition in frame_buffer: Exception code: %d>\n", frame_buffer->nStatus);
 				return img;
 			}
 			// Acquisition success, then format converter
-			if (!_convertFormat(frame_buffer)){
-				DahengInitManager::emStatus = GXQBuf(camera, frame_buffer);
+			if (!_convertFormat(frame_buffers[cam_frame_num-1])){
+				DahengInitManager::emStatus = GXQAllBufs(camera);
 				printf("<Abnormal Acquisition in convertFormat: Exception code: %d>\n", frame_buffer->nStatus);
 				return img;
 			}
@@ -435,7 +478,7 @@ RawImage CaptureDaheng::getFrame()
 			img.setData(rgb_image_buf);
 
 			// release frame_buffer for continuous grab
-			DahengInitManager::emStatus = GXQBuf(camera, frame_buffer);
+			DahengInitManager::emStatus = GXQAllBufs(camera);
 		}
 		catch (...)
 		{
@@ -548,6 +591,7 @@ string CaptureDaheng::getCaptureMethodName() const
 
 bool CaptureDaheng::copyAndConvertFrame(const RawImage &src, RawImage &target)
 {
+	if(src.getWidth()==0 || src.getHeight()==0) return false;
 	std::unique_lock<std::mutex> lock(_mutex);
 	try
 	{
@@ -562,13 +606,10 @@ bool CaptureDaheng::copyAndConvertFrame(const RawImage &src, RawImage &target)
 	return true;
 }
 
-void CaptureDaheng::readAllParameterValues()
-{
+void CaptureDaheng::readAllParameterValues(){
 	std::unique_lock<std::mutex> lock(_mutex);
-	try
-	{
-		if (camera == NULL)
-		{
+	try{
+		if (camera == NULL){
 			return;
 		}
 
@@ -584,6 +625,10 @@ void CaptureDaheng::readAllParameterValues()
 			printf("Check balance mode failed.\n");
 			v_auto_balance->setBool(false);
 		}
+
+		// read GX_INT_DEVICE_LINK_CURRENT_THROUGHPUT:
+		DahengInitManager::emStatus = GXGetInt(camera, GX_INT_DEVICE_LINK_CURRENT_THROUGHPUT, &nValue);
+		// printf("read GX_INT_DEVICE_LINK_CURRENT_THROUGHPUT : %ld.\n", nValue);
 
 		// Get white balance
 		double balance_value;
@@ -655,86 +700,13 @@ void CaptureDaheng::readAllParameterValues()
 		}else{
 			printf("Get frame rate value failed.\n");
 		}
-		// DahengInitManager::emStatus = GXSetBool(camera, GX_BOOL_GAMMA_ENABLE, true);
-		// if(DahengInitManager::emStatus == GX_STATUS_SUCCESS)
-		// {
-		// 	printf("Set gamma enable status succeed.\n");
-		// }
-		// else
-		// {
-		// 	printf("Set gamma enable status failed.\n");
-		// }
-		// // Determines whether the current camera supports Gamma capture .
-		// bool is_gamma_implemented;
-		// DahengInitManager::emStatus = GXIsImplemented(camera, GX_FLOAT_GAMMA_PARAM,
-		// &is_gamma_implemented);
-		// if(DahengInitManager::emStatus == GX_STATUS_SUCCESS)
-		// {
-		// 	//std::cout << "Camera supports gamma: " << is_gamma_implemented << std::endl;
-		// }
-		// else
-		// {
-		// 	//std::cout << "Check whether camera supports gamma failed." << std::endl;
-		// }
-		// // bool gamma_enable;
-		// // DahengInitManager::emStatus = GXGetBool(camera, GX_BOOL_GAMMA_ENABLE, &gamma_enable);
-		// // if(DahengInitManager::emStatus == GX_STATUS_SUCCESS)
-		// // {
-		// // 	v_gamma_enable->setBool(gamma_enable);
-		// // }
-		// // else
-		// // {
-		// // 	printf("Get gamma enable status failed.\n");
-		// // 	v_gamma_enable->setBool(false);
-		// // }
-		// //Sets Gamma mode to user-defined mode.
-		// DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_GAMMA_MODE, GX_GAMMA_SELECTOR_USER);
-		// if(DahengInitManager::emStatus == GX_STATUS_SUCCESS)
-		// {
-		// 	printf("Set gamma user mode failed.\n");
-		// }
-		// else
-		// {
-		// 	printf("Set gamma user mode succeed.\n");
-		// }
 
-		// // Gets the Gamma adjustment parameter.
-		// double gamma_value;
-		// DahengInitManager::emStatus = GXGetFloat(camera, GX_FLOAT_GAMMA_PARAM, &gamma_value);
-		// if(DahengInitManager::emStatus == GX_STATUS_SUCCESS)
-		// {
-		// 	v_gamma->setDouble(gamma_value);
-		// }
-		// else
-		// {
-		// 	printf("Get gamma value failed.\n");
-		// }
-
-		// //Gets to continuous automatic black level mode.
-		// DahengInitManager::emStatus = GXGetEnum(camera, GX_ENUM_BLACKLEVEL_AUTO, &nValue);
-		// if(DahengInitManager::emStatus == GX_STATUS_SUCCESS)
-		// {
-		// 	v_auto_black->setBool(nValue == GX_BLACKLEVEL_AUTO_CONTINUOUS);
-		// }
-		// else
-		// {
-		// 	printf("Check black level mode failed.\n");
-		// 	v_auto_black->setBool(false);
-		// }
-
-		// //Selects the black level channel type.
-		// DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_BLACKLEVEL_SELECTOR, GX_BLACKLEVEL_SELECTOR_ALL);
-		// // Gets the range of the black level.
-		// double black_level;
-		// DahengInitManager::emStatus = GXGetFloat(camera, GX_FLOAT_BLACKLEVEL, &black_level);
-		// if(DahengInitManager::emStatus == GX_STATUS_SUCCESS)
-		// {
-		// 	v_black_level->setDouble(black_level);
-		// }
-		// else
-		// {
-		// 	printf("Get black level failed.\n");
-		// }
+		DahengInitManager::emStatus = GXGetEnum(camera, GX_ENUM_DEVICE_LINK_THROUGHPUT_LIMIT_MODE, &nValue);
+		if (DahengInitManager::emStatus == GX_STATUS_SUCCESS){
+			v_limit_mode->setBool(nValue == GX_DEVICE_LINK_THROUGHPUT_LIMIT_MODE_ON);
+		}else{
+			printf("Get limit mode value failed.\n");
+		}
 
 		// Check exposure mode
 		DahengInitManager::emStatus = GXGetEnum(camera, GX_ENUM_EXPOSURE_AUTO, &nValue);
@@ -783,277 +755,106 @@ void CaptureDaheng::resetCamera(unsigned int new_id)
 	// //std::cout << __FUNCTION__ << ", Ends...";
 }
 
-// void CaptureDaheng::writeParameterValues()
-// {
-// 	MUTEX_LOCK;
-// 	try
-// 	{
-//         if (camera != NULL)
-// 		{
-//             if(v_auto_balance->getBool())
-// 			{
-// 				DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_BALANCE_WHITE_AUTO, GX_BALANCE_WHITE_AUTO_CONTINUOUS);
-// 				if(DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-// 				{
-// 					printf("Set balance auto mode failed.\n");
-// 				}
-//             }
-// 			else
-// 			{
-// 				DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_BALANCE_WHITE_AUTO, GX_BALANCE_WHITE_AUTO_OFF);
-// 				DahengInitManager::emStatus=GXSetEnum(camera, GX_ENUM_BALANCE_RATIO_SELECTOR, GX_BALANCE_RATIO_SELECTOR_RED);
-// 				DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_BALANCE_RATIO, f_balance_ratio_red);
-// 				v_balance_ratio_red->setDouble(f_balance_ratio_red);
-// 				if(DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-// 				{
-// 					printf("Set red balance value failed.\n");
-// 				}
-// 				DahengInitManager::emStatus=GXSetEnum(camera, GX_ENUM_BALANCE_RATIO_SELECTOR, GX_BALANCE_RATIO_SELECTOR_GREEN);
-// 				DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_BALANCE_RATIO, f_balance_ratio_green);
-// 				v_balance_ratio_green->setDouble(f_balance_ratio_green);
-// 				if(DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-// 				{
-// 					printf("Set green balance value failed.\n");
-// 				}
-// 				DahengInitManager::emStatus=GXSetEnum(camera, GX_ENUM_BALANCE_RATIO_SELECTOR, GX_BALANCE_RATIO_SELECTOR_BLUE);
-// 				DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_BALANCE_RATIO, f_balance_ratio_blue);
-// 				v_balance_ratio_blue->setDouble(f_balance_ratio_blue);
-// 				if(DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-// 				{
-// 					printf("Set blue balance value failed.\n");
-// 				}
-//             }
-//             // camera->BalanceWhiteAuto.SetValue(Daheng_GigECamera::BalanceWhiteAuto_Once);
-//
-//             if(v_auto_gain->getBool())
-// 			{
-// 				DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_GAIN_AUTO, GX_GAIN_AUTO_CONTINUOUS);
-// 				if(DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-// 				{
-// 					printf("Set gain auto mode failed.\n");
-// 				}
-//             }
-// 			else
-// 			{
-// 				DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_GAIN_AUTO, GX_GAIN_AUTO_OFF);
-// 				// Set gain value
-// 				// Selects the gain channel type.
-// 				DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_GAIN_SELECTOR, GX_GAIN_SELECTOR_ALL);
-// 				// Gets the gain value.
-// 				DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_GAIN, f_gain);
-// 				v_gain->setDouble(f_gain);
-// 				if(DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-// 				{
-// 					printf("Set gain value failed.\n");
-// 				}
-//             }
-//
-//             if(v_auto_exposure->getBool())
-// 			{
-// 				// Set exposure mode
-// 				DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_EXPOSURE_AUTO, GX_EXPOSURE_AUTO_CONTINUOUS);
-// 				if(DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-// 				{
-// 					printf("Set exposure auto mode on failed.\n");
-// 				}
-//             }
-// 			else
-// 			{
-// 				// Set exposure time
-// 				DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_EXPOSURE_AUTO, GX_EXPOSURE_AUTO_OFF);
-// 				if(DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-// 				{
-// 					printf("Set exposure auto mode off failed.\n");
-// 				}
-// 				DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_EXPOSURE_TIME, f_exposure_time);
-// 				v_exposure_time->setDouble(f_exposure_time);
-// 				if(DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-// 				{
-// 					printf("Set exposure time failed.\n");
-// 				}
-//             }
-//         }
-// 	}
-// 	catch(...)
-// 	{
-// 		fprintf(stderr, "Error writing parameter values.\n");
-// 		MUTEX_UNLOCK;
-// 		throw;
-// 	}
-// 	// is_param_recoved = true;
-// 	MUTEX_UNLOCK;
-// }
-
 void CaptureDaheng::writeParameterValues(VarList *vars)
 {
-	std::unique_lock<std::mutex> lock(_mutex);
 	if (vars != this->settings)
 	{
 		//std::cout << __FUNCTION__ << "vars != this->settings" << std::endl;
 		return;
 	}
-	// else
-	// {
-	// 	//std::cout << __FUNCTION__ << "vars == this->settings" << std::endl;
-	// 	if(is_param_recoved == false)
-	// 	{
-	// 		// //std::cout << __FUNCTION__ << "vars == this->settings" << std::endl;
-	// 		f_balance_ratio_red =  v_balance_ratio_red->getDouble();
-	// 		f_balance_ratio_green = v_balance_ratio_green->getDouble();
-	// 		f_balance_ratio_blue = v_balance_ratio_blue->getDouble();
-	// 		f_gain = v_gain->getDouble();
-	// 		f_exposure_time = v_exposure_time->getDouble();
-	// 		//std::cout << f_balance_ratio_red << std::endl;
-	// 		//std::cout << f_balance_ratio_green << std::endl;
-	// 		//std::cout << f_balance_ratio_blue << std::endl;
-	// 		//std::cout << f_gain << std::endl;
-	// 		//std::cout << f_exposure_time << std::endl;
-	// 	}
-	// 	// return;
-	// }
-	// bool restart = is_capturing;
-	//if (restart) {
-	//	_stopCapture();
-	//}
-	try
-	{
+	if(camera == nullptr){
+		printf("Camera Pointer is NULL, return.\n");
+	}
+	try{
 		camera_id = v_camera_id->get();
+		DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_ACQUISITION_FRAME_RATE_MODE,
+												GX_ACQUISITION_FRAME_RATE_MODE_ON);
+		DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_ACQUISITION_FRAME_RATE, 70.0);
 
-		// MUTEX_UNLOCK;
-		// resetCamera(v_camera_id->get()); // locks itself
-		// MUTEX_LOCK;
-		//Device stop acquisition
-
-		// DahengInitManager::emStatus = GXStreamOff(camera);
-		// if(DahengInitManager::emStatus == GX_STATUS_SUCCESS)
-		// {
-		// 	printf("Camera stream off.\n");
-		// }
-
-		if (camera != NULL)
+		if (v_auto_balance->getBool())
 		{
-			// //使 能 采 集 帧 率 调 节 模 式
-			DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_ACQUISITION_FRAME_RATE_MODE,
-													GX_ACQUISITION_FRAME_RATE_MODE_ON);
-			// //设 置 采 集 帧 率,假 设 设 置 为 10.0, 用 户 按 照 实 际 需 求 设 置 此 值
-			DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_ACQUISITION_FRAME_RATE, 70.0);
-
-			if (v_auto_balance->getBool())
+			DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_BALANCE_WHITE_AUTO, GX_BALANCE_WHITE_AUTO_CONTINUOUS);
+			if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
 			{
-				DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_BALANCE_WHITE_AUTO, GX_BALANCE_WHITE_AUTO_CONTINUOUS);
-				if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-				{
-					printf("Set balance auto mode failed.\n");
-				}
+				printf("Set balance auto mode failed.\n");
 			}
-			else
-			{
-				DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_BALANCE_WHITE_AUTO, GX_BALANCE_WHITE_AUTO_OFF);
-				DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_BALANCE_RATIO_SELECTOR, GX_BALANCE_RATIO_SELECTOR_RED);
-				DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_BALANCE_RATIO, v_balance_ratio_red->getDouble());
-				if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-				{
-					printf("Set red balance value failed.\n");
-				}
-				DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_BALANCE_RATIO_SELECTOR, GX_BALANCE_RATIO_SELECTOR_GREEN);
-				DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_BALANCE_RATIO, v_balance_ratio_green->getDouble());
-				if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-				{
-					printf("Set green balance value failed.\n");
-				}
-				DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_BALANCE_RATIO_SELECTOR, GX_BALANCE_RATIO_SELECTOR_BLUE);
-				DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_BALANCE_RATIO, v_balance_ratio_blue->getDouble());
-				if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-				{
-					printf("Set blue balance value failed.\n");
-				}
-			}
-			// camera->BalanceWhiteAuto.SetValue(Daheng_GigECamera::BalanceWhiteAuto_Once);
-
-			if (v_auto_gain->getBool())
-			{
-				DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_GAIN_AUTO, GX_GAIN_AUTO_CONTINUOUS);
-				if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-				{
-					printf("Set gain auto mode failed.\n");
-				}
-			}
-			else
-			{
-				DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_GAIN_AUTO, GX_GAIN_AUTO_OFF);
-				// Set gain value
-				// Selects the gain channel type.
-				DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_GAIN_SELECTOR, GX_GAIN_SELECTOR_ALL);
-				// Gets the gain value.
-				DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_GAIN, v_gain->getDouble());
-				if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-				{
-					printf("Set gain value failed.\n");
-				}
-			}
-
-			// if(v_gamma_enable->getBool())
-			// {
-			// 	DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_GAMMA_PARAM, v_gamma->getDouble());
-			//	if(DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-			//	{
-			//		printf("Set gamma value failed.\n");
-			//	}
-			// }
-
-			// if(v_auto_black->getBool())
-			// {
-			// Set black level auto mode
-			// 	DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_BLACKLEVEL_AUTO, GX_BLACKLEVEL_AUTO_CONTINUOUS);
-			//	if(DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-			//	{
-			//		printf("Set black level auto mode failed.\n");
-			// 	}
-			// }
-			// else
-			// {
-			// 	// Set black level channel
-			// 	DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_BLACKLEVEL_SELECTOR, GX_BLACKLEVEL_SELECTOR_ALL);
-			// 	// Set black level
-			// 	DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_BLACKLEVEL, v_black_level->getDouble());
-			// 	if(DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-			// 	{
-			// 		printf("Set black level failed.\n");
-			// 	}
-			//          }
-
-			if (v_auto_exposure->getBool())
-			{
-				// Set exposure mode
-				DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_EXPOSURE_AUTO, GX_EXPOSURE_AUTO_CONTINUOUS);
-				if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-				{
-					printf("Set exposure auto mode on failed.\n");
-				}
-			}
-			else
-			{
-				// Set exposure time
-				DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_EXPOSURE_AUTO, GX_EXPOSURE_AUTO_OFF);
-				if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-				{
-					printf("Set exposure auto mode off failed.\n");
-				}
-				DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_EXPOSURE_TIME, v_exposure_time->getDouble());
-				if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
-				{
-					printf("Set exposure time failed.\n");
-				}
-			}
-
-			DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_ACQUISITION_FRAME_RATE, v_target_fps->getDouble());
-
 		}
-		// DahengInitManager::emStatus = GXStreamOn(camera);
-		// if(DahengInitManager::emStatus == GX_STATUS_SUCCESS)
-		// {
-		// 	printf("Camera stream on.\n");
-		// }
+		else
+		{
+			DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_BALANCE_WHITE_AUTO, GX_BALANCE_WHITE_AUTO_OFF);
+			DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_BALANCE_RATIO_SELECTOR, GX_BALANCE_RATIO_SELECTOR_RED);
+			DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_BALANCE_RATIO, v_balance_ratio_red->getDouble());
+			if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
+			{
+				printf("Set red balance value failed.\n");
+			}
+			DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_BALANCE_RATIO_SELECTOR, GX_BALANCE_RATIO_SELECTOR_GREEN);
+			DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_BALANCE_RATIO, v_balance_ratio_green->getDouble());
+			if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
+			{
+				printf("Set green balance value failed.\n");
+			}
+			DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_BALANCE_RATIO_SELECTOR, GX_BALANCE_RATIO_SELECTOR_BLUE);
+			DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_BALANCE_RATIO, v_balance_ratio_blue->getDouble());
+			if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
+			{
+				printf("Set blue balance value failed.\n");
+			}
+		}
+
+		if (v_auto_gain->getBool())
+		{
+			DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_GAIN_AUTO, GX_GAIN_AUTO_CONTINUOUS);
+			if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
+			{
+				printf("Set gain auto mode failed.\n");
+			}
+		}
+		else
+		{
+			DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_GAIN_AUTO, GX_GAIN_AUTO_OFF);
+			// Set gain value
+			// Selects the gain channel type.
+			DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_GAIN_SELECTOR, GX_GAIN_SELECTOR_ALL);
+			// Gets the gain value.
+			DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_GAIN, v_gain->getDouble());
+			if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
+			{
+				printf("Set gain value failed.\n");
+			}
+		}
+
+		if (v_auto_exposure->getBool())
+		{
+			// Set exposure mode
+			DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_EXPOSURE_AUTO, GX_EXPOSURE_AUTO_CONTINUOUS);
+			if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
+			{
+				printf("Set exposure auto mode on failed.\n");
+			}
+		}
+		else
+		{
+			// Set exposure time
+			DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_EXPOSURE_AUTO, GX_EXPOSURE_AUTO_OFF);
+			if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
+			{
+				printf("Set exposure auto mode off failed.\n");
+			}
+			DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_EXPOSURE_TIME, v_exposure_time->getDouble());
+			if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
+			{
+				printf("Set exposure time failed.\n");
+			}
+		}
+
+		DahengInitManager::emStatus = GXSetFloat(camera, GX_FLOAT_ACQUISITION_FRAME_RATE, v_target_fps->getDouble());
+		if (DahengInitManager::emStatus != GX_STATUS_SUCCESS)
+		{
+			printf("Set acq frame rate failed.\n");
+		}
+		DahengInitManager::emStatus = GXSetEnum(camera, GX_ENUM_DEVICE_LINK_THROUGHPUT_LIMIT_MODE, v_limit_mode->getBool()?GX_DEVICE_LINK_THROUGHPUT_LIMIT_MODE_ON:GX_DEVICE_LINK_THROUGHPUT_LIMIT_MODE_OFF);
+
 	}
 	catch (...)
 	{
@@ -1076,7 +877,8 @@ void CaptureDaheng::mvc_connect(VarList *group)
 void CaptureDaheng::changed(VarType *group)
 {
 	if (group->getType() == VARTYPE_ID_LIST)
-	{
+	{	
+		std::unique_lock<std::mutex> lock(_mutex);
 		writeParameterValues(dynamic_cast<VarList *>(group));
 	}
 }
